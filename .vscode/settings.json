@@ -1,0 +1,36 @@
+{
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.ruff": "explicit",
+        "source.organizeImports.ruff": "explicit"
+    },
+
+    "editor.formatOnType": true,
+    // "[plaintext]": {  // TXT 文件的语法模式
+    //     "editor.wordWrap": "bounded"
+    // },
+    "files.associations": {
+        "*.txt": "plaintext"  // 确保.txt文件被识别为纯文本
+    },
+
+    // use ruff in Python files:
+    "[python]": {
+      "editor.defaultFormatter": "charliermarsh.ruff",
+      "editor.formatOnSave": true    // format .py on save
+    },
+    "ruff.organizeImports": false, // 禁止ruff对imports进行处理
+
+    "python.analysis.extraPaths": [ 
+        "./third_party/utils_python/mr_utils",
+        // "./third_party/rl_games/rl_games",
+        "./third_party/pytorch_kinematics/pytorch_kinematics",
+    ],
+    "python.analysis.exclude": [
+        "output",
+        "assets",
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python-envs.pythonProjects": []
+}

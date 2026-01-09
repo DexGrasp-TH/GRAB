@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Launch main.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": ["--grab-path", "/data/dataset/GRAB/extract/grab", "--model-path", "model/models_smplx_v1_1/models"]
+
+
+    }
+  ]
+}

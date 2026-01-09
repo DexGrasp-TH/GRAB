@@ -21,6 +21,7 @@ import os
 import glob
 import smplx
 import argparse
+from pathlib import Path
 
 from tqdm import tqdm
 from tools.objectmodel import ObjectModel
@@ -33,6 +34,8 @@ from tools.utils import prepare_params
 from tools.utils import to_cpu
 from tools.utils import append2dict
 from tools.utils import np2torch
+from tools.utils import contact_ids as CONTACT_IDS
+from tools.utils import hand_contact_ids as HAND_CONTACT_IDS
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 INTENTS = ["lift", "pass", "offhand", "use", "all"]
@@ -58,11 +61,7 @@ class GRABDataSet(object):
         self.logger("intent:%s --> processing %s sequences!" % (self.intent, self.intent))
 
         if cfg.splits is None:
-            self.splits = {
-                "test": ["mug", "wineglass", "camera", "binoculars", "fryingpan", "toothpaste"],
-                "val": ["apple", "toothbrush", "elephant", "hand"],
-                "train": [],
-            }
+            raise ValueError("No data splits provided")
         else:
             assert isinstance(cfg.splits, dict)
             self.splits = cfg.splits
@@ -73,21 +72,10 @@ class GRABDataSet(object):
         self.selected_seqs = []
         self.obj_based_seqs = {}
         self.sbj_based_seqs = {}
-        self.split_seqs = {"test": [], "val": [], "train": []}
+        self.split_seqs = {}
 
         # group, mask, and sort sequences based on objects, subjects, and intents
         self.process_sequences()
-
-        self.logger("Total sequences: %d" % len(self.all_seqs))
-        self.logger("Selected sequences: %d" % len(self.selected_seqs))
-        self.logger(
-            "Number of sequences in each data split : train: %d , test: %d , val: %d"
-            % (len(self.split_seqs["train"]), len(self.split_seqs["test"]), len(self.split_seqs["val"]))
-        )
-        self.logger(
-            "Number of objects in each data split : train: %d , test: %d , val: %d"
-            % (len(self.splits["train"]), len(self.splits["test"]), len(self.splits["val"]))
-        )
 
         # process the data
         self.data_preprocessing(cfg)
@@ -102,8 +90,13 @@ class GRABDataSet(object):
         self.obj_info = {}
         self.sbj_info = {}
 
+        contact_id_to_name = {}
+        for key, val in CONTACT_IDS.items():
+            contact_id_to_name[val] = key
+
         for split in self.split_seqs.keys():
             self.logger("Processing data for %s split." % (split))
+            self.logger("Number of sequences: %d" % len(self.split_seqs[split]))
 
             frame_names = []
             body_data = {
@@ -124,8 +117,14 @@ class GRABDataSet(object):
             object_data = {"verts": [], "global_orient": [], "transl": [], "contact": []}
             lhand_data = {"verts": [], "global_orient": [], "hand_pose": [], "transl": [], "fullpose": []}
             rhand_data = {"verts": [], "global_orient": [], "hand_pose": [], "transl": [], "fullpose": []}
+            seq_names = []
 
-            for sequence in tqdm(self.split_seqs[split]):
+            n_grasps = 0
+            n_right_hand = 0
+            n_left_hand = 0
+            n_both_hand = 0
+
+            for sequence in tqdm(self.split_seqs[split], desc="Pre-processing sequences"):
                 seq_data = parse_npz(sequence)
 
                 obj_name = seq_data.obj_name
@@ -216,24 +215,104 @@ class GRABDataSet(object):
                     body_data["contact"].append(seq_data.contact.body[frame_mask])
                     object_data["contact"].append(seq_data.contact.object[frame_mask][:, obj_info["verts_sample_id"]])
 
+                seq_names.append(sequence)
                 frame_names.extend(["%s_%s" % (sequence.split(".")[0], fId) for fId in np.arange(T)])
+
+            ###################### Segement grasps from sequences based on contacts ######################
+
+            segmented_grasps = []  # 用于存储所有切分出的抓取片段
+            # 设定一个阈值，过滤掉时间太短的误触
+            MIN_GRASP_DURATION = 10
+
+            for i_seq, contact_data in enumerate(tqdm(object_data["contact"], desc=f"Segmenting {split} grasps")):
+                mask = np.isin(
+                    contact_data, list(HAND_CONTACT_IDS.values())
+                )  # 创建一个掩码：只有当 contact_id in HAND_CONTACT_IDS 中时才保留
+                filtered_contact_data = np.where(mask, contact_data, 0)
+
+                # 1. 计算每一帧的总接触点数
+                n_contact_on_obj = np.sum(filtered_contact_data > 0, axis=1)
+
+                # 2. 确定哪些帧存在接触 (True/False)
+                is_contacting = n_contact_on_obj > 0
+
+                # 3. 寻找接触状态变化的索引 (利用 diff 寻找 0->1 和 1->0 的转折点)
+                diff = np.diff(is_contacting.astype(int), prepend=0, append=0)
+                starts = np.where(diff == 1)[0]
+                ends = np.where(diff == -1)[0]  # 注意：ends 是不包含接触的后一帧
+
+                # 4. 遍历每一个切分出来的片段
+                for segment_idx, (start, end) in enumerate(zip(starts, ends)):
+                    duration = end - start
+                    if duration < MIN_GRASP_DURATION:
+                        continue
+
+                    # 在这个片段(segment)内寻找最佳抓取帧
+                    segment_contacts = n_contact_on_obj[start:end]
+                    # 局部最大值的相对索引
+                    local_max_idx = np.argmax(segment_contacts)
+                    # 全局帧索引
+                    grasp_frame_id = start + local_max_idx
+
+                    # --- 以下是你原有的逻辑：判断左右手 ---
+                    contacts = filtered_contact_data[grasp_frame_id]
+                    right_hand = any(contact_id_to_name[c].startswith("R_") for c in contacts if c > 0)
+                    left_hand = any(contact_id_to_name[c].startswith("L_") for c in contacts if c > 0)
+
+                    grasp_type = (
+                        "both_hand"
+                        if (right_hand and left_hand)
+                        else "right_hand"
+                        if right_hand
+                        else "left_hand"
+                        if left_hand
+                        else "none"
+                    )
+
+                    n_grasps += 1
+                    n_right_hand += 1 if grasp_type == "right_hand" else 0
+                    n_left_hand += 1 if grasp_type == "left_hand" else 0
+                    n_both_hand += 1 if grasp_type == "both_hand" else 0
+
+                    # --- 核心保存逻辑 ---
+                    # 提取该片段在原 sequence 中的所有数据
+                    grasp_info = {
+                        "seq_source": seq_names[i_seq],
+                        "segment_id": segment_idx,
+                        "start_frame": start,
+                        "end_frame": end,
+                        "best_grasp_frame": grasp_frame_id,
+                        # 提取这一段的 Body 数据 (对字典内的每个数组进行切片)
+                        "body": {k: v[i_seq][start:end] for k, v in body_data.items() if len(v) > i_seq},
+                        # 提取这一段的 Object 数据
+                        "object": {k: v[i_seq][start:end] for k, v in object_data.items() if len(v) > i_seq},
+                        # 提取左右手数据
+                        "left_hand": {k: v[i_seq][start:end] for k, v in lhand_data.items() if len(v) > i_seq},
+                        "right_hand": {k: v[i_seq][start:end] for k, v in rhand_data.items() if len(v) > i_seq},
+                        # 记录抓取类型
+                        "grasp_type": grasp_type,
+                    }
+
+                    original_seq_path = seq_names[i_seq]
+                    rel_dir = Path(original_seq_path).parent.name
+                    save_dir = os.path.join(self.out_path, rel_dir)
+                    base_name = os.path.basename(original_seq_path).split(".")[0]
+                    os.makedirs(save_dir, exist_ok=True)
+
+                    save_filename = f"{base_name}_seg{segment_idx}.npy"
+                    save_full_path = os.path.join(save_dir, save_filename)
+                    np.save(save_full_path, grasp_info)
+
+                    # self.logger(f"Save segmented grasp to {save_full_path}.")
+                    # print(f"Seq {seq_names[i_seq]} | Segment {segment_idx}: Frames {start}-{end}, Type: {grasp_type}")
 
             self.logger("Processing for %s split finished" % split)
             self.logger("Total number of frames for %s split is:%d" % (split, len(frame_names)))
-
-            out_data = [body_data, rhand_data, lhand_data, object_data]
-            out_data_name = ["body_data", "rhand_data", "lhand_data", "object_data"]
-
-            for idx, data in enumerate(out_data):
-                data = np2torch(data)
-                data_name = out_data_name[idx]
-                outfname = makepath(os.path.join(self.out_path, split, "%s.pt" % data_name), isfile=True)
-                torch.save(data, outfname)
-
-            np.savez(os.path.join(self.out_path, split, "frame_names.npz"), frame_names=frame_names)
-
-        np.save(os.path.join(self.out_path, "obj_info.npy"), self.obj_info)
-        np.save(os.path.join(self.out_path, "sbj_info.npy"), self.sbj_info)
+            self.logger("Total number of sequences for %s split is:%d" % (split, len(self.split_seqs[split])))
+            self.logger("Number of segmented grasps: %d" % n_grasps)
+            self.logger("Number of right hand grasps: %d" % n_right_hand)
+            self.logger("Number of left hand grasps: %d" % n_left_hand)
+            self.logger("Number of both hand grasps: %d" % n_both_hand)
 
     def process_sequences(self):
         for sequence in self.all_seqs:
@@ -263,14 +342,11 @@ class GRABDataSet(object):
 
             # split train, val, and test sequences
             self.selected_seqs.append(sequence)
-            if object_name in self.splits["test"]:
-                self.split_seqs["test"].append(sequence)
-            elif object_name in self.splits["val"]:
-                self.split_seqs["val"].append(sequence)
-            else:
-                self.split_seqs["train"].append(sequence)
-                if object_name not in self.splits["train"]:
-                    self.splits["train"].append(object_name)
+            for key in self.splits:
+                if key not in self.split_seqs.keys():
+                    self.split_seqs[key] = []
+                if object_name in self.splits[key]:
+                    self.split_seqs[key].append(sequence)
 
     def filter_contact_frames(self, seq_data):
         if self.cfg.only_contact:
@@ -350,19 +426,12 @@ if __name__ == "__main__":
     process_id = "GRAB_V01"  # choose an appropriate ID for the processed data
     model_path = "model/models_smplx_v1_1/models"
     grab_path = "/data/dataset/GRAB/extract/grab"
-    out_path = "/data/dataset/GRAB/processed"
+    out_path = "/data/dataset/GRAB/segment_grasps"
 
-    # grab_path = 'PATH_TO_DOWNLOADED_GRAB_DATA/grab'
-    # out_path = 'PATH_TO_THE LOCATION_TO_SAVE_DATA'
-    # process_id = 'GRAB_V00' # choose an appropriate ID for the processed data
-    # model_path = 'PATH_TO_DOWNLOADED_MODELS_FROM_SMPLX_WEBSITE/'
-
-    # split the dataset based on the objects
-    grab_splits = {
-        "test": ["mug", "wineglass", "camera", "binoculars", "fryingpan", "toothpaste"],
-        "val": ["apple", "toothbrush", "elephant", "hand"],
-        "train": [],
-    }
+    # # split the dataset based on the objects
+    # grab_splits = {
+    #     "test": ["mug"],
+    # }
 
     grab_splits = {  # all objects
         "test": [
@@ -424,13 +493,11 @@ if __name__ == "__main__":
             "wineglass",
             "wristwatch",
         ],
-        "val": [],
-        "train": [],
     }
 
     cfg = {
         "intent": "all",  # from 'all', 'use' , 'pass', 'lift' , 'offhand'
-        "only_contact": True,  # if True, returns only frames with contact
+        "only_contact": False,  # if True, returns only frames with contact
         "save_body_verts": False,  # if True, will compute and save the body vertices
         "save_lhand_verts": False,  # if True, will compute and save the body vertices
         "save_rhand_verts": False,  # if True, will compute and save the body vertices
@@ -440,7 +507,7 @@ if __name__ == "__main__":
         "splits": grab_splits,
         # IO path
         "grab_path": grab_path,
-        "out_path": os.path.join(out_path, process_id),
+        "out_path": out_path,
         # number of vertices samples for each object
         "n_verts_sample": 1024,
         # body and hand model path

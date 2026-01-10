@@ -171,13 +171,18 @@ class GRABDataSet(object):
 
                 # 物体顶点与接触
                 obj_info = self.load_obj_verts(obj_name, seq_data, cfg.n_verts_sample)
+                current_object_data["name"] = obj_name
+                if cfg.save_object_scale:
+                    verts = obj_info["verts_sample"]
+                    v_extent = np.max(verts, axis=0) - np.min(verts, axis=0)
+                    diagonal_scale = np.linalg.norm(v_extent)
+                    current_object_data["scale"] = diagonal_scale
                 if cfg.save_object_verts:
                     obj_m = ObjectModel(v_template=obj_info["verts_sample"], batch_size=T)
                     obj_parms = params2torch(current_seq_object)
                     current_object_data["verts"] = to_cpu(obj_m(**obj_parms).vertices)
 
                 # 获取当前序列的接触数据
-                # 对应原逻辑: object_data["contact"].append(...)
                 current_contact_data = seq_data.contact.object[frame_mask][:, obj_info["verts_sample_id"]]
                 if cfg.save_contact:
                     current_body_data["contact"] = seq_data.contact.body[frame_mask]
@@ -230,10 +235,13 @@ class GRABDataSet(object):
                         "start_frame": start,
                         "end_frame": end,
                         "best_grasp_frame": grasp_frame_id,
-                        "body": {k: v[start:end] for k, v in current_body_data.items()},
-                        "object": {k: v[start:end] for k, v in current_object_data.items()},
-                        "left_hand": {k: v[start:end] for k, v in current_lhand_data.items()},
-                        "right_hand": {k: v[start:end] for k, v in current_rhand_data.items()},
+                        "body": {k: v[grasp_frame_id] for k, v in current_body_data.items()},
+                        "object": {
+                            k: v if k in ["name", "scale"] else v[grasp_frame_id]
+                            for k, v in current_object_data.items()
+                        },
+                        "left_hand": {k: v[grasp_frame_id] for k, v in current_lhand_data.items()},
+                        "right_hand": {k: v[grasp_frame_id] for k, v in current_rhand_data.items()},
                         "grasp_type": grasp_type,
                     }
 
@@ -333,32 +341,12 @@ class GRABDataSet(object):
 
 
 if __name__ == "__main__":
-    instructions = """ 
-    Please do the following steps before starting the GRAB dataset processing:
-    1. Download GRAB dataset from the website https://grab.is.tue.mpg.de/ 
-    2. Set the grab_path, out_path to the correct folder
-    3. Change the configuration file for your desired data, like:
-    
-        a) if you only need the frames with contact,
-        b) if you need body, hand, or object vertices to be computed,
-        c) which data splits
-            and etc
-        
-        WARNING: saving vertices requires a high-capacity RAM memory.
-        
-    4. In case you need body or hand vertices make sure to set the model_path
-        to the models downloaded from smplx website 
-    
-    This code will process the data and save the pt files in the out_path folder.
-    You can use the dataloader.py file to load and use the data.    
-
-        """
-
     parser = argparse.ArgumentParser(description="GRAB-vertices")
 
     parser.add_argument("--grab-path", default=None, type=str, help="The path to the downloaded grab data")
     parser.add_argument("--out-path", default=None, type=str, help="The path to the folder to save the processed data")
     parser.add_argument("--model-path", default=None, type=str, help="The path to the folder containing smplx models")
+    parser.add_argument("--object-set", default="mug", type=str, help="The set of objects to process")
 
     args = parser.parse_args()
 
@@ -371,72 +359,72 @@ if __name__ == "__main__":
     grab_path = "/data/dataset/GRAB/extract/grab"
     out_path = "/data/dataset/GRAB/segment_grasps"
 
-    # # split the dataset based on the objects
-    # grab_splits = {
-    #     "test": ["mug"],
-    # }
-
-    grab_splits = {  # all objects
-        "test": [
-            "airplane",
-            "alarmclock",
-            "apple",
-            "banana",
-            "binoculars",
-            "body",
-            "bowl",
-            "camera",
-            "coffeemug",
-            "cubelarge",
-            "cubemedium",
-            "cubemiddle",
-            "cubesmall",
-            "cup",
-            "cylinderlarge",
-            "cylindermedium",
-            "cylindersmall",
-            "doorknob",
-            "duck",
-            "elephant",
-            "eyeglasses",
-            "flashlight",
-            "flute",
-            "fryingpan",
-            "gamecontroller",
-            "hammer",
-            "hand",
-            "headphones",
-            "knife",
-            "lightbulb",
-            "mouse",
-            "mug",
-            "phone",
-            "piggybank",
-            "pyramidlarge",
-            "pyramidmedium",
-            "pyramidsmall",
-            "rubberduck",
-            "scissors",
-            "spherelarge",
-            "spheremedium",
-            "spheresmall",
-            "stamp",
-            "stanfordbunny",
-            "stapler",
-            "table",
-            "teapot",
-            "toothbrush",
-            "toothpaste",
-            "toruslarge",
-            "torusmedium",
-            "torussmall",
-            "train",
-            "watch",
-            "waterbottle",
-            "wineglass",
-            "wristwatch",
-        ],
-    }
+    if args.object_set == "all":
+        grab_splits = {  # all objects
+            "test": [
+                "airplane",
+                "alarmclock",
+                "apple",
+                "banana",
+                "binoculars",
+                "body",
+                "bowl",
+                "camera",
+                "coffeemug",
+                "cubelarge",
+                "cubemedium",
+                "cubemiddle",
+                "cubesmall",
+                "cup",
+                "cylinderlarge",
+                "cylindermedium",
+                "cylindersmall",
+                "doorknob",
+                "duck",
+                "elephant",
+                "eyeglasses",
+                "flashlight",
+                "flute",
+                "fryingpan",
+                "gamecontroller",
+                "hammer",
+                "hand",
+                "headphones",
+                "knife",
+                "lightbulb",
+                "mouse",
+                "mug",
+                "phone",
+                "piggybank",
+                "pyramidlarge",
+                "pyramidmedium",
+                "pyramidsmall",
+                "rubberduck",
+                "scissors",
+                "spherelarge",
+                "spheremedium",
+                "spheresmall",
+                "stamp",
+                "stanfordbunny",
+                "stapler",
+                "table",
+                "teapot",
+                "toothbrush",
+                "toothpaste",
+                "toruslarge",
+                "torusmedium",
+                "torussmall",
+                "train",
+                "watch",
+                "waterbottle",
+                "wineglass",
+                "wristwatch",
+            ],
+        }
+    else:
+        grab_splits = {
+            "test": [args.object_set],
+        }
 
     cfg = {
         "intent": "all",  # from 'all', 'use' , 'pass', 'lift' , 'offhand'
@@ -444,6 +432,7 @@ if __name__ == "__main__":
         "save_body_verts": False,  # if True, will compute and save the body vertices
         "save_lhand_verts": False,  # if True, will compute and save the body vertices
         "save_rhand_verts": False,  # if True, will compute and save the body vertices
+        "save_object_scale": True,
         "save_object_verts": False,
         "save_contact": True,  # if True, will add the contact info to the saved data
         # splits
@@ -464,7 +453,5 @@ if __name__ == "__main__":
 
     log_dir = os.path.join(cfg.out_path, "grab_processing.log")
     logger = makelogger(log_dir=log_dir, mode="a").info
-
-    logger(instructions)
 
     GRABDataSet(cfg, logger)

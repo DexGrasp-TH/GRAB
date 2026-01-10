@@ -38,7 +38,7 @@ def visualize_sequences(cfg):
     grab_path = cfg.grab_path
 
     # all_seqs = glob.glob(grab_path + "/*/*eat*.npz")
-    all_seqs = glob.glob(grab_path + "/s1/mug_drink_2.npz")
+    all_seqs = glob.glob(grab_path + "/s8/fryingpan_lift.npz")
 
     mv = MeshViewer(offscreen=False)
 

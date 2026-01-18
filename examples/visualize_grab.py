@@ -34,11 +34,37 @@ from tools.cfg_parser import Config
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def create_axis_mesh(length=0.2, thickness=0.01):
+    """创建一个简单的 RGB 坐标轴 Mesh 列表"""
+    # X 轴 (红色)
+    x_axis = Mesh(
+        vertices=np.array([[0, 0, 0], [length, 0, 0], [length, thickness, 0], [0, thickness, 0]]),
+        faces=np.array([[0, 1, 2], [0, 2, 3]]),
+        vc=colors["red"],
+    )
+
+    # Y 轴 (绿色)
+    y_axis = Mesh(
+        vertices=np.array([[0, 0, 0], [0, length, 0], [thickness, length, 0], [thickness, 0, 0]]),
+        faces=np.array([[0, 1, 2], [0, 2, 3]]),
+        vc=colors["green"],
+    )
+
+    # Z 轴 (蓝色)
+    z_axis = Mesh(
+        vertices=np.array([[0, 0, 0], [0, 0, length], [0, thickness, length], [0, thickness, 0]]),
+        faces=np.array([[0, 1, 2], [0, 2, 3]]),
+        vc=colors["blue"],
+    )
+
+    return [x_axis, y_axis, z_axis]
+
+
 def visualize_sequences(cfg):
     grab_path = cfg.grab_path
 
     # all_seqs = glob.glob(grab_path + "/*/*eat*.npz")
-    all_seqs = glob.glob(grab_path + "/s8/fryingpan_lift.npz")
+    all_seqs = glob.glob(grab_path + "/s1/mug_drink_1.npz")
 
     mv = MeshViewer(offscreen=False)
 
@@ -90,6 +116,8 @@ def vis_sequence(cfg, sequence, mv):
     table_parms = params2torch(seq_data.table.params)
     verts_table = to_cpu(table_m(**table_parms).vertices)
 
+    axis_meshes = create_axis_mesh(length=0.3)  # 创建一次
+
     skip_frame = 4
     for frame in range(0, T, skip_frame):
         o_mesh = Mesh(vertices=verts_obj[frame], faces=obj_mesh.faces, vc=colors["yellow"])
@@ -100,7 +128,7 @@ def vis_sequence(cfg, sequence, mv):
 
         t_mesh = Mesh(vertices=verts_table[frame], faces=table_mesh.faces, vc=colors["white"])
 
-        mv.set_static_meshes([o_mesh, s_mesh, t_mesh])
+        mv.set_static_meshes([o_mesh, s_mesh, t_mesh] + axis_meshes)
 
 
 if __name__ == "__main__":

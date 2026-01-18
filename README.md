@@ -236,3 +236,18 @@ For commercial licensing (and all related questions for business applications), 
 
 
 ![footer](images/sequence.jpg)
+
+## Mingrui
+
+### Installation
+```bash
+pip install chumpy
+pip install 'numpy<1.24'
+```
+
+### Usage
+
+Extract, reformat, and save grasps:
+```bash
+python scripts/segment_grasps_2.py --object-set all
+```

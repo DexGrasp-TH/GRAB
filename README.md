@@ -251,3 +251,19 @@ Extract, reformat, and save grasps:
 ```bash
 python scripts/segment_grasps_2.py --object-set all
 ```
+
+Extract table-verified grasp candidates without overwriting the legacy output:
+```bash
+python scripts/extract_tabletop_grasps.py \
+    --grab-root "$GRAB_RAW_ROOT" \
+    --model-root "$GRAB_BODY_MODEL_ROOT" \
+    --output-root "$ANYSCALEGRASP_DATA_ROOT/GRAB-tabletop-pilot" \
+    --sequence s1/airplane_fly_1.npz \
+    --device cpu
+```
+
+The extractor follows the contact-interval and pre-motion frame selection in
+`segment_grasps_2.py`, then verifies every candidate against the posed table
+mesh. A sequence may produce multiple records. The output root must not exist;
+use `--validate-only` to check the full raw inventory and asset references
+without writing an artifact.

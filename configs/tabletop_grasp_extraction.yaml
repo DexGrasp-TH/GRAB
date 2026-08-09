@@ -1,0 +1,21 @@
+# Paths must be supplied through the CLI or a machine-local config.
+grab_root: null
+model_root: null
+output_root: null
+
+# Reproduce the candidate generation behavior in segment_grasps_2.py.
+contact_sample_size: 1024
+contact_sample_seed: 100
+min_contact_frames: 10
+object_translation_threshold_m: 0.01
+
+# Table-relative verification. The first supported raw frame may increase the
+# effective distance threshold, but never beyond the calibrated cap.
+max_table_distance_m: 0.01
+anchor_margin_m: 0.002
+max_calibrated_table_distance_m: 0.02
+footprint_margin_m: 0.005
+min_footprint_overlap_fraction: 0.01
+near_surface_band_m: 0.002
+
+device: cpu
